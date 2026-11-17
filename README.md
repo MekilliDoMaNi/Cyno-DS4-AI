@@ -43,3 +43,7 @@ Verifica locale: 65 test superati. Verificato il passaggio 0.6.2 -> 0.6.3 tramit
 Vedi [AGGIORNAMENTI.md](AGGIORNAMENTI.md). Lo strumento `tools/Cyno.UpdatePublisher` usa una chiave privata protetta nel solo account Windows del proprietario, separata dalla firma delle licenze. Nel codice è presente soltanto la chiave pubblica.
 
 Codice originale MIT; pesi e dipendenze hanno licenze separate: vedi LICENSE e THIRD-PARTY-NOTICES.md.
+
+## Notifiche Discord
+
+Le nuove Release stabili possono essere annunciate automaticamente in **📌・𝗜nfo-ds4ai**. È necessario configurare il segreto privato del webhook: vedi [DISCORD.md](DISCORD.md). Il link di invito è disponibile in cima alla pagina.

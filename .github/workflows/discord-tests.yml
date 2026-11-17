@@ -1,0 +1,12 @@
+name: Discord notification tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifica messaggi e protezione webhook senza inviare notifiche
+        run: python3 .github/scripts/test_notify_discord.py
