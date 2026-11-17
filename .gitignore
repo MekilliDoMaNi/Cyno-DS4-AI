@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+TestResults/
+*.user
+
+*.dpapi
+*.cynolicense
+*.cynorequest
+*.pfx
+*.previous
+*.updating
+app/
+app-v*/
+desktop/
