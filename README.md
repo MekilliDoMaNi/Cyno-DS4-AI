@@ -1,5 +1,7 @@
 # Cyno DS4.AI 0.6.3
 
+[Entra su Discord](https://discord.gg/nWbTcaxQw) · [Scarica l’ultima versione](https://github.com/MekilliDoMaNi/Cyno-DS4-AI/releases/latest)
+
 Applicazione Windows x64 in C# .NET 8, con interfaccia cyberpunk, supporto DualSense/DualSense Edge e controller Xbox 360 virtuale. Ricostruzione indipendente; non affiliata a Sony o al programma DS4AI originale.
 
 ## Download
