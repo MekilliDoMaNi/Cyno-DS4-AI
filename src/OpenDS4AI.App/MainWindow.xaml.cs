@@ -68,9 +68,10 @@ public partial class MainWindow : Window
                     try{physical=device.Read();s=profile.ApplyOutputLayout(profile.Apply(physical));lastInput=Environment.TickCount64;}
                     catch(TimeoutException){s=default;received=false;if(Environment.TickCount64-lastInput>5000)throw new IOException("Nessun report dal controller da 5 secondi.");}
                     if(session.IsCancellationRequested)break;
-                    TargetPoint? target;int size;long observed;double age;lock(gate){observed=frameStamp;age=Math.Max(0,(Environment.TickCount64-observed)/1000.0);target=age<0.25?detected:null;size=frameSize;}
-                    var settings=assistSettings;if(useWarzone&&useOnnx)settings=settings with {AimOffsetY=0};if(size!=settings.FovRadius*2)target=null;
-                    if(received)s=engine.Process(s,settings,target,size,clock.Elapsed.TotalSeconds,observed,age,physical);else engine.Reset();
+                    bool held=received&&assistSettings.ActivationPressed(physical);if(held!=activationHeld){activationHeld=held;Interlocked.Increment(ref engineGeneration);lock(gate){detected=null;frameStamp=0;}}
+                    var settings=assistSettings;TargetPoint? target;int size;long observed;double age;bool geometryMatches;lock(gate){observed=frameStamp;age=Math.Max(0,(Environment.TickCount64-observed)/1000.0);target=age<0.25?detected:null;size=frameSize;geometryMatches=frameRadius==settings.FovRadius&&frameWideContext==settings.WideContext;}
+                    if(useWarzone&&useOnnx)settings=settings with {AimOffsetY=0};int controlSize=settings.FovRadius*2;if(!geometryMatches)target=null;else if(target is {} capturedPoint)target=VisionGeometry.ToControlSpace(capturedPoint,size,controlSize);
+                    if(received)s=engine.Process(s,settings,target,controlSize,clock.Elapsed.TotalSeconds,observed,age,physical);else engine.Reset();
                     backend.Submit(s);lock(gate){latest=s;aimCorrectionX=engine.LastAimX;aimCorrectionY=engine.LastAimY;}
                     if(received && Interlocked.Increment(ref reports)==1)Log("FIRST_INPUT: controller reale inoltrato a "+backend.Name);
                 }

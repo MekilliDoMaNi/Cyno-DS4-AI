@@ -1,4 +1,4 @@
-# Cyno DS4.AI 0.6.3
+# Cyno DS4.AI 0.6.4
 
 [Entra su Discord](https://discord.gg/nWbTcaxQw) · [Scarica l’ultima versione](https://github.com/MekilliDoMaNi/Cyno-DS4-AI/releases/latest)
 
@@ -36,7 +36,7 @@ dotnet test CynoDS4AI.sln -c Release
 dotnet publish src/OpenDS4AI.App/OpenDS4AI.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 ```
 
-Verifica locale: 65 test superati. Verificato il passaggio 0.6.2 -> 0.6.3 tramite helper firmato con sostituzione, riavvio, licenza invariata e input DualSense inoltrato al controller virtuale. La verifica online dipende dalla pubblicazione della Release.
+Verifica locale: 72 test superati. Verificato il passaggio 0.6.2 -> 0.6.3 tramite helper firmato con sostituzione, riavvio, licenza invariata e input DualSense inoltrato al controller virtuale. La verifica online dipende dalla pubblicazione della Release.
 
 ## Pubblicare aggiornamenti
 
@@ -47,3 +47,9 @@ Codice originale MIT; pesi e dipendenze hanno licenze separate: vedi LICENSE e T
 ## Notifiche Discord
 
 Le nuove Release stabili possono essere annunciate automaticamente in **📌・𝗜nfo-ds4ai**. È necessario configurare il segreto privato del webhook: vedi [DISCORD.md](DISCORD.md). Il link di invito è disponibile in cima alla pagina.
+
+## Novità 0.6.4
+
+Corretta la perdita di intensità dell'assistenza con lo stick manuale a frequenza elevata. Aggiunti mantenimento del bersaglio osservato, analisi del contesto più ampia del FOV, compensazione limitata del ritardo e preset zona testa stimata. Nella scheda VISIONE premi APPLICA PRESET ZONA TESTA STIMATA per applicare e salvare le opzioni nuove. I comandi L1/L2 e lo schema mira/fuoco vengono conservati.
+
+La testa viene stimata al 12% dall'alto del rettangolo persona: non è un nuovo modello anatomico o Warzone. Mancano garanzia di aggancio permanente, headshot continui e validazione in partita. Vedi [TRACCIAMENTO-0.6.4.md](TRACCIAMENTO-0.6.4.md) per implementazione, prove e limiti.

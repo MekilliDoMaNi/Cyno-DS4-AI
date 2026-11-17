@@ -13,11 +13,11 @@ public partial class MainWindow
 {
     private volatile AssistSettings assistSettings=new();
     private volatile bool useOnnx;
-    private volatile bool useWarzone=true;private volatile float anchorValue=0.35f;private long engineGeneration;
+    private volatile bool keepTarget,estimateHead,activationHeld;private volatile bool useWarzone=true;private volatile float anchorValue=0.35f;private long engineGeneration;
     private volatile string modelPath=Path.Combine(AppContext.BaseDirectory,"models","yolov8n.onnx");
     private Task? visionWorker;
     private TargetPoint? detected;
-    private int frameSize=300;
+    private int frameSize=300,frameRadius=150;private bool frameWideContext;
     private byte[]? frame;
     private long frameStamp;
     private string visionMessage="Rilevamento disattivato";
@@ -25,11 +25,12 @@ public partial class MainWindow
     private bool updatingSettings;
     private string settingsError="";
     private string SettingsPath=>Path.Combine(Path.GetDirectoryName(profilePath)!,"assistance.json");
-    private sealed record SavedSettings(Profile Profile,AssistSettings Assistance,bool Onnx,string ModelPath,float Confidence=0.45f,bool AutoReconnect=true,bool Overlay=false,int Display=0,bool ExcludeCapture=true,bool Warzone=true,float Anchor=0.35f);
+    private sealed record SavedSettings(Profile Profile,AssistSettings Assistance,bool Onnx,string ModelPath,float Confidence=0.45f,bool AutoReconnect=true,bool Overlay=false,int Display=0,bool ExcludeCapture=true,bool Warzone=true,float Anchor=0.35f,bool KeepTarget=false,bool HeadEstimate=false);
     private void InitializeAssistance()
     {
         foreach(var s in new[]{Tolerance,Fov,Strength,Smooth,AimOffset,Confidence,RecoilY,RecoilX,RapidMs,BunnyMs,PingDelay,PingCooldown,SwapMs,SlideDuration,AimLimit,AimDamp,AimDeadband})s.ValueChanged+=(_,_)=>UpdateAssistance();
-        foreach(var c in new[]{AimEnabled,OnnxMode,ActivationLT,Recoil,Rapid,Bunny,Ping,Swap,Slide,StableControl,ReverseAimX,ReverseAimY}) {c.Checked+=(_,_)=>UpdateAssistance();c.Unchecked+=(_,_)=>UpdateAssistance();}
+        foreach(var c in new[]{AimEnabled,OnnxMode,ActivationLT,Recoil,Rapid,Bunny,Ping,Swap,Slide,StableControl,ReverseAimX,ReverseAimY,LatencyControl,WideVisionControl}) {c.Checked+=(_,_)=>UpdateAssistance();c.Unchecked+=(_,_)=>UpdateAssistance();}
+        KeepTargetControl.Checked+=(_,_)=>UpdateEngineMode();KeepTargetControl.Unchecked+=(_,_)=>UpdateEngineMode();HeadEstimateControl.Checked+=(_,_)=>UpdateEngineMode();HeadEstimateControl.Unchecked+=(_,_)=>UpdateEngineMode();
         ActivationChoice.SelectedIndex=0;ActivationChoice.SelectionChanged+=(_,_)=>UpdateAssistance();
         Marker.TextChanged+=(_,_)=>UpdateAssistance();
         GameEngineChoice.ItemsSource=new[]{"Warzone / indipendente","Generico / centro FOV"};GameEngineChoice.SelectedIndex=0;GameEngineChoice.SelectionChanged+=(_,_)=>UpdateEngineMode();WarzoneAnchor.ValueChanged+=(_,_)=>UpdateEngineMode();try{modelPath=ModelVault.EnsureBundledModel();}catch(Exception ex){Log("Model vault: "+ex.Message);}ModelLabel.Text=modelPath;AimEnabled.IsChecked=true;OnnxMode.IsChecked=File.Exists(modelPath);
@@ -41,18 +42,33 @@ public partial class MainWindow
         if(updatingSettings)return;
         try
         {
-            var settings=new AssistSettings{AimEnabled=AimEnabled.IsChecked==true,MarkerHex=Marker.Text.Trim().TrimStart('#'),ColorTolerance=(int)Tolerance.Value,FovRadius=(int)Fov.Value,Strength=(float)Strength.Value,Smooth=(float)Smooth.Value,AimOffsetY=(float)AimOffset.Value,ActivateOnLeftTrigger=ActivationLT.IsChecked==true,ActivateOnL1=ActivationChoice.SelectedIndex==1,AntiRecoil=Recoil.IsChecked==true,RecoilVertical=(float)RecoilY.Value,RecoilHorizontal=(float)RecoilX.Value,RapidFire=Rapid.IsChecked==true,RapidPeriodMs=(int)RapidMs.Value,BunnyHop=Bunny.IsChecked==true,BunnyPeriodMs=(int)BunnyMs.Value,AutoPing=Ping.IsChecked==true,PingDelayMs=(int)PingDelay.Value,PingCooldownMs=(int)PingCooldown.Value,SpamSwap=Swap.IsChecked==true,SwapPeriodMs=(int)SwapMs.Value,CancelSlide=Slide.IsChecked==true,SlideMs=(int)SlideDuration.Value,StableAim=StableControl.IsChecked==true,AimMaxOutput=(float)AimLimit.Value,AimDamping=(float)AimDamp.Value,AimDeadbandPixels=(float)AimDeadband.Value,InvertAimX=ReverseAimX.IsChecked==true,InvertAimY=ReverseAimY.IsChecked==true};
-            settings.Validate();if(settings!=assistSettings || useOnnx!=(OnnxMode.IsChecked==true)){lock(gate){detected=null;frameStamp=0;}}assistSettings=settings;useOnnx=OnnxMode.IsChecked==true;settingsError="";
+            var settings=new AssistSettings{AimEnabled=AimEnabled.IsChecked==true,MarkerHex=Marker.Text.Trim().TrimStart('#'),ColorTolerance=(int)Tolerance.Value,FovRadius=(int)Fov.Value,Strength=(float)Strength.Value,Smooth=(float)Smooth.Value,AimOffsetY=(float)AimOffset.Value,ActivateOnLeftTrigger=ActivationLT.IsChecked==true,ActivateOnL1=ActivationChoice.SelectedIndex==1,AntiRecoil=Recoil.IsChecked==true,RecoilVertical=(float)RecoilY.Value,RecoilHorizontal=(float)RecoilX.Value,RapidFire=Rapid.IsChecked==true,RapidPeriodMs=(int)RapidMs.Value,BunnyHop=Bunny.IsChecked==true,BunnyPeriodMs=(int)BunnyMs.Value,AutoPing=Ping.IsChecked==true,PingDelayMs=(int)PingDelay.Value,PingCooldownMs=(int)PingCooldown.Value,SpamSwap=Swap.IsChecked==true,SwapPeriodMs=(int)SwapMs.Value,CancelSlide=Slide.IsChecked==true,SlideMs=(int)SlideDuration.Value,StableAim=StableControl.IsChecked==true,AimMaxOutput=(float)AimLimit.Value,AimDamping=(float)AimDamp.Value,AimDeadbandPixels=(float)AimDeadband.Value,InvertAimX=ReverseAimX.IsChecked==true,InvertAimY=ReverseAimY.IsChecked==true,CompensateVisionLatency=LatencyControl.IsChecked==true,WideContext=WideVisionControl.IsChecked==true};
+            settings.Validate();if(settings!=assistSettings || useOnnx!=(OnnxMode.IsChecked==true)){Interlocked.Increment(ref engineGeneration);lock(gate){detected=null;frameStamp=0;}}assistSettings=settings;useOnnx=OnnxMode.IsChecked==true;settingsError="";
         }catch(ArgumentException ex){settingsError=ex.Message;assistSettings=assistSettings with {AimEnabled=false};VisionStatus.Text=ex.Message;}
     }
-    private SavedSettings CaptureSettings()=>new(CurrentProfile(),assistSettings,useOnnx,modelPath,(float)Confidence.Value,Reconnect.IsChecked==true,ShowFov.IsChecked==true,selectedDisplay,HideCapture.IsChecked==true,useWarzone,anchorValue);
+    private void HeadPreset_Click(object sender,RoutedEventArgs e)
+    {
+        updatingSettings=true;
+        try
+        {
+            GameEngineChoice.SelectedIndex=0;KeepTargetControl.IsChecked=true;HeadEstimateControl.IsChecked=true;
+            WideVisionControl.IsChecked=true;LatencyControl.IsChecked=true;StableControl.IsChecked=true;
+            AimEnabled.IsChecked=true;OnnxMode.IsChecked=true;Fov.Value=150;Strength.Value=1.4;Smooth.Value=0.08;
+            AimLimit.Value=0.23;AimDamp.Value=1;AimDeadband.Value=2;
+            ProfileName.Text="Warzone - zona testa stimata 0.6.4";
+        }
+        finally{updatingSettings=false;UpdateEngineMode();UpdateAssistance();activeProfile=CurrentProfile();}
+        try{SaveAssistance();SaveNamedCurrent();Status.Text="Preset salvato. Zona testa stimata dal corpo; riconoscimento testa dedicato non presente.";}
+        catch(Exception ex){Status.Text="Preset applicato, salvataggio non riuscito: "+ex.Message;}
+    }
+    private SavedSettings CaptureSettings()=>new(CurrentProfile(),assistSettings,useOnnx,modelPath,(float)Confidence.Value,Reconnect.IsChecked==true,ShowFov.IsChecked==true,selectedDisplay,HideCapture.IsChecked==true,useWarzone,anchorValue,keepTarget,estimateHead);
     private void SaveAssistance(){UpdateAssistance();if(settingsError.Length>0)throw new ArgumentException(settingsError);var s=CaptureSettings();s.Profile.Validate();Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);string temp=SettingsPath+".tmp";File.WriteAllText(temp,JsonSerializer.Serialize(s,new JsonSerializerOptions{WriteIndented=true}));File.Move(temp,SettingsPath,true);}
     private void ApplySaved(SavedSettings saved)
     {
         if(saved.Profile==null||saved.Assistance==null)throw new InvalidDataException("Profilo incompleto.");saved.Profile.Validate();saved.Assistance.Validate();if(!float.IsFinite(saved.Confidence)||saved.Confidence<0.1||saved.Confidence>0.95)throw new InvalidDataException("Soglia AI non valida.");updatingSettings=true;
         try
         {
-            GameEngineChoice.SelectedIndex=saved.Warzone?0:1;WarzoneAnchor.Value=Math.Clamp(saved.Anchor,0.15f,0.8f);UpdateEngineMode();Confidence.Value=saved.Confidence;SetProfile(saved.Profile);Reconnect.IsChecked=saved.AutoReconnect;ShowFov.IsChecked=saved.Overlay;HideCapture.IsChecked=saved.ExcludeCapture;DisplayChoice.SelectedIndex=Math.Clamp(saved.Display,0,Math.Max(0,displays.Count-1));var s=saved.Assistance;StableControl.IsChecked=s.StableAim;AimLimit.Value=s.AimMaxOutput;AimDamp.Value=s.AimDamping;AimDeadband.Value=s.AimDeadbandPixels;ReverseAimX.IsChecked=s.InvertAimX;ReverseAimY.IsChecked=s.InvertAimY;
+            KeepTargetControl.IsChecked=saved.KeepTarget;HeadEstimateControl.IsChecked=saved.HeadEstimate;GameEngineChoice.SelectedIndex=saved.Warzone?0:1;WarzoneAnchor.Value=Math.Clamp(saved.Anchor,0.15f,0.8f);UpdateEngineMode();Confidence.Value=saved.Confidence;SetProfile(saved.Profile);Reconnect.IsChecked=saved.AutoReconnect;ShowFov.IsChecked=saved.Overlay;HideCapture.IsChecked=saved.ExcludeCapture;DisplayChoice.SelectedIndex=Math.Clamp(saved.Display,0,Math.Max(0,displays.Count-1));var s=saved.Assistance;StableControl.IsChecked=s.StableAim;AimLimit.Value=s.AimMaxOutput;AimDamp.Value=s.AimDamping;AimDeadband.Value=s.AimDeadbandPixels;ReverseAimX.IsChecked=s.InvertAimX;ReverseAimY.IsChecked=s.InvertAimY;LatencyControl.IsChecked=s.CompensateVisionLatency;WideVisionControl.IsChecked=s.WideContext;
             AimEnabled.IsChecked=s.AimEnabled;Marker.Text=s.MarkerHex;Tolerance.Value=s.ColorTolerance;Fov.Value=s.FovRadius;Strength.Value=s.Strength;Smooth.Value=s.Smooth;AimOffset.Value=s.AimOffsetY;ActivationLT.IsChecked=s.ActivateOnLeftTrigger;ActivationChoice.SelectedIndex=s.ActivateOnL1?1:0;Recoil.IsChecked=s.AntiRecoil;RecoilY.Value=s.RecoilVertical;RecoilX.Value=s.RecoilHorizontal;Rapid.IsChecked=s.RapidFire;RapidMs.Value=s.RapidPeriodMs;Bunny.IsChecked=s.BunnyHop;BunnyMs.Value=s.BunnyPeriodMs;Ping.IsChecked=s.AutoPing;PingDelay.Value=s.PingDelayMs;PingCooldown.Value=s.PingCooldownMs;Swap.IsChecked=s.SpamSwap;SwapMs.Value=s.SwapPeriodMs;Slide.IsChecked=s.CancelSlide;SlideDuration.Value=s.SlideMs;OnnxMode.IsChecked=saved.Onnx;modelPath=string.IsNullOrWhiteSpace(saved.ModelPath)||saved.ModelPath.EndsWith("yolov8n.onnx",StringComparison.OrdinalIgnoreCase)?ModelVault.EnsureBundledModel():saved.ModelPath;ModelLabel.Text=modelPath;
         }
         finally{updatingSettings=false;UpdateAssistance();activeProfile=CurrentProfile();}
@@ -83,20 +99,21 @@ public partial class MainWindow
             while(!token.IsCancellationRequested)
             {
                 var settings=assistSettings;long generation=Interlocked.Read(ref engineGeneration);if(generation!=lastGeneration){warzone.Reset();lastGeneration=generation;}
+                if(!activationHeld)warzone.Reset();
                 if(!settings.AimEnabled){lock(gate){detected=null;frame=null;visionMessage="Rilevamento disattivato";}if(token.WaitHandle.WaitOne(100))break;continue;}
                 try
                 {
-                    int size=settings.FovRadius*2;
+                    var monitors=displays.Count>0?displays:DisplayCatalog.GetDisplays();var monitorInfo=monitors[Math.Clamp(selectedDisplay,0,monitors.Count-1)];int size=VisionGeometry.CaptureSize(settings.FovRadius,settings.WideContext,monitorInfo.Width,monitorInfo.Height);
                     int monitor=selectedDisplay;if(capture==null||capture.Size!=size||captureDisplay!=monitor){capture?.Dispose();capture=null;capture=new(size,monitor);captureDisplay=monitor;}
                     long capturedAt=Environment.TickCount64;var sw=Stopwatch.StartNew();var pixels=capture.Grab();TargetPoint? target;
                     if(useOnnx)
                     {
                         string path=modelPath;
                         if(detector==null||path!=loadedPath){detector?.Dispose();detector=null;detector=new(path);loadedPath=path;}
-                        target=useWarzone?warzone.Select(detector.DetectCandidates(pixels,size,size,Math.Max(0.05f,confidenceValue*0.65f)),size,settings.FovRadius,trackClock.Elapsed.TotalSeconds,new(confidenceValue,anchorValue)):detector.Detect(pixels,size,size,settings,confidenceValue);
+                        target=useWarzone?warzone.Select(detector.DetectCandidates(pixels,size,size,Math.Max(0.05f,confidenceValue*0.65f)),size,settings.FovRadius,trackClock.Elapsed.TotalSeconds,new(confidenceValue,estimateHead?0.12f:anchorValue,KeepTarget:keepTarget&&activationHeld,RequireVisibleTop:estimateHead)):detector.Detect(pixels,size,size,settings,confidenceValue);
                     }
                     else target=ColorTargetDetector.Detect(pixels,size,size,settings);
-                    if(generation!=Interlocked.Read(ref engineGeneration))target=null;Interlocked.Exchange(ref visionElapsedTicks,sw.ElapsedTicks);lock(gate){detected=target;frame=pixels;frameSize=size;frameStamp=capturedAt;visionMessage=$"{(useOnnx?(useWarzone?"Warzone / modello generico":"AI generica"):"Marcatore colore")} • {sw.Elapsed.TotalMilliseconds:F0} ms • {(target.HasValue?$"bersaglio {target.Value.X:F0}, {target.Value.Y:F0}":"nessun bersaglio")}";}
+                    if(generation!=Interlocked.Read(ref engineGeneration))target=null;Interlocked.Exchange(ref visionElapsedTicks,sw.ElapsedTicks);lock(gate){detected=target;frame=pixels;frameSize=size;frameRadius=settings.FovRadius;frameWideContext=settings.WideContext;frameStamp=capturedAt;visionMessage=$"{(useOnnx?(useWarzone?"Warzone / modello generico":"AI generica"):"Marcatore colore")} • {sw.Elapsed.TotalMilliseconds:F0} ms • {(target.HasValue?$"bersaglio {target.Value.X:F0}, {target.Value.Y:F0}":"nessun bersaglio")}";}
                 }
                 catch(Exception ex){lock(gate){detected=null;frame=null;visionMessage="Rilevamento non disponibile: "+ex.Message;}if(token.WaitHandle.WaitOne(500))break;}
                 if(token.WaitHandle.WaitOne(useOnnx?1:16))break;
@@ -104,7 +121,7 @@ public partial class MainWindow
         }
         finally{capture?.Dispose();detector?.Dispose();lock(gate){detected=null;frame=null;}}
     }
-    private void UpdateEngineMode(){useWarzone=GameEngineChoice.SelectedIndex==0;anchorValue=(float)WarzoneAnchor.Value;Interlocked.Increment(ref engineGeneration);lock(gate){detected=null;frameStamp=0;}}
+    private void UpdateEngineMode(){keepTarget=KeepTargetControl.IsChecked==true;estimateHead=HeadEstimateControl.IsChecked==true;useWarzone=GameEngineChoice.SelectedIndex==0;anchorValue=(float)WarzoneAnchor.Value;Interlocked.Increment(ref engineGeneration);lock(gate){detected=null;frameStamp=0;}}
     private volatile float confidenceValue=0.45f;
     private void RefreshVision()
     {
@@ -115,6 +132,7 @@ public partial class MainWindow
         if(Environment.TickCount64-previewStamp<150)return;previewStamp=Environment.TickCount64;
         PreviewOverlay.Children.Clear();if(pixels==null){Preview.Source=null;return;}
         var bitmap=BitmapSource.Create(size,size,96,96,PixelFormats.Bgr32,null,pixels,size*4);bitmap.Freeze();Preview.Source=bitmap;
+        double diameter=assistSettings.FovRadius*2.0*330/size;var fovRing=new System.Windows.Shapes.Ellipse{Width=diameter,Height=diameter,Stroke=Brushes.Cyan,StrokeThickness=1};Canvas.SetLeft(fovRing,(330-diameter)/2);Canvas.SetTop(fovRing,(330-diameter)/2);PreviewOverlay.Children.Add(fovRing);
         TargetPoint? point;lock(gate)point=detected;if(point is {} t){var dot=new System.Windows.Shapes.Ellipse{Width=10,Height=10,Stroke=Brushes.Lime,StrokeThickness=2};Canvas.SetLeft(dot,t.X*330/size-5);Canvas.SetTop(dot,t.Y*330/size-5);PreviewOverlay.Children.Add(dot);}
     }
 }

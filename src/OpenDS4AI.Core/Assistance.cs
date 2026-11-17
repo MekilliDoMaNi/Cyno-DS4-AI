@@ -11,12 +11,15 @@ public sealed record AssistSettings
     public float AimOffsetY { get; init; }
     public bool ActivateOnLeftTrigger { get; init; } = true;
     public bool ActivateOnL1 { get; init; }
+    public bool ActivationPressed(PadState input)=>!ActivateOnLeftTrigger||(ActivateOnL1?input.Buttons.HasFlag(Buttons.LB):input.LT>30);
     public bool StableAim {get;init;}=true;
     public float AimMaxOutput {get;init;}=0.3f;
     public float AimDeadbandPixels {get;init;}=3;
     public float AimDamping {get;init;}=0.4f;
     public bool InvertAimX {get;init;}
     public bool InvertAimY {get;init;}
+    public bool CompensateVisionLatency {get;init;}
+    public bool WideContext {get;init;}
     public bool AntiRecoil { get; init; }
     public float RecoilVertical { get; init; } = 0.14f;
     public float RecoilHorizontal { get; init; }
@@ -89,7 +92,7 @@ public sealed class AssistEngine
         settings.Validate();if(captureSize<=0||!double.IsFinite(elapsedSeconds)||elapsedSeconds<0||!double.IsFinite(observationAgeSeconds)||observationAgeSeconds<0)throw new ArgumentException("Tempo o dimensione cattura non validi.");
         if(!double.IsNaN(previousTime)&&elapsedSeconds<previousTime)Reset();double delta=double.IsNaN(previousTime)?1.0/120:Math.Min(0.1,elapsedSeconds-previousTime);previousTime=elapsedSeconds;
         var activation=activationInput??input;
-        bool active=settings.AimEnabled&&(!settings.ActivateOnLeftTrigger||(settings.ActivateOnL1?activation.Buttons.HasFlag(Buttons.LB):activation.LT>30))&&observationAgeSeconds<=0.25;
+        bool active=settings.AimEnabled&&settings.ActivationPressed(activation)&&observationAgeSeconds<=0.25;
         if(active&&target is {} point&&float.IsFinite(point.X)&&float.IsFinite(point.Y))
         {
             float half=captureSize/2f,px=point.X-half,py=-(point.Y-half+settings.AimOffsetY*captureSize);
@@ -109,18 +112,27 @@ public sealed class AssistEngine
                     lastErrorX=ex;lastErrorY=ey;lastObservationTime=observationTime;lastObservationId=observationId;
                 }
                 float freshness=(float)Math.Clamp((0.25-observationAgeSeconds)/0.13,0,1),gain=settings.Strength*freshness,kd=settings.AimDamping*0.08f;
-                float desiredX=Toward(ex,ex*gain+velocityX*kd,settings.AimMaxOutput),desiredY=Toward(ey,ey*gain+velocityY*kd,settings.AimMaxOutput);
+                float predictedX=ex,predictedY=ey;
+                if(settings.CompensateVisionLatency)
+                {
+                    float age=(float)Math.Min(observationAgeSeconds,0.1);
+                    predictedX+=Math.Clamp(velocityX*age,-0.2f,0.2f);
+                    predictedY+=Math.Clamp(velocityY*age,-0.2f,0.2f);
+                }
+                float desiredX=Toward(ex,predictedX*gain+velocityX*kd,settings.AimMaxOutput),desiredY=Toward(ey,predictedY*gain+velocityY*kd,settings.AimMaxOutput);
                 float norm=MathF.Sqrt(desiredX*desiredX+desiredY*desiredY);if(norm>settings.AimMaxOutput){desiredX*=settings.AimMaxOutput/norm;desiredY*=settings.AimMaxOutput/norm;}
                 float alpha=(float)(1-Math.Exp(-delta/(0.012+settings.Smooth*0.08)));
                 correctionX+=(desiredX-correctionX)*alpha;correctionY+=(desiredY-correctionY)*alpha;
                 // Stop on the centre immediately and never add a correction away from a visible error.
-                if(Math.Abs(px)<=settings.AimDeadbandPixels||correctionX*ex<0)correctionX=0;
-                if(Math.Abs(py)<=settings.AimDeadbandPixels||correctionY*ey<0)correctionY=0;
-                float manual=Math.Clamp((0.95f-MathF.Sqrt(input.RX*input.RX+input.RY*input.RY))/0.45f,0,1);correctionX*=manual;correctionY*=manual;
+                if(Math.Abs(px)<=settings.AimDeadbandPixels||correctionX*ex<0||predictedX*ex<=0)correctionX=0;
+                if(Math.Abs(py)<=settings.AimDeadbandPixels||correctionY*ey<0||predictedY*ey<=0)correctionY=0;
             }
         }
         else ClearAim();
-        var result=input with {RX=Math.Clamp(input.RX+correctionX,-1,1),RY=Math.Clamp(input.RY+correctionY,-1,1)};LastAimX=result.RX-input.RX;LastAimY=result.RY-input.RY;
+        // Weight the output, not the integrator: repeated attenuation inside the state
+        // made assistance disappear with moderate manual input at 1000 Hz.
+        float manualWeight=settings.StableAim?Math.Clamp((0.95f-MathF.Sqrt(input.RX*input.RX+input.RY*input.RY))/0.45f,0,1):1;
+        var result=input with {RX=Math.Clamp(input.RX+correctionX*manualWeight,-1,1),RY=Math.Clamp(input.RY+correctionY*manualWeight,-1,1)};LastAimX=result.RX-input.RX;LastAimY=result.RY-input.RY;
         bool firing=input.RT>30;if(firing&&settings.AntiRecoil)result=result with {RX=Math.Clamp(result.RX+settings.RecoilHorizontal,-1,1),RY=Math.Clamp(result.RY-settings.RecoilVertical,-1,1)};
         if(!firing||!settings.RapidFire)fireStarted=double.NaN;else{if(double.IsNaN(fireStarted))fireStarted=elapsedSeconds;if(IsReleased(elapsedSeconds-fireStarted,settings.RapidPeriodMs))result=result with {RT=0};}
         bool jumping=(input.Buttons&Buttons.A)!=0;if(!jumping||!settings.BunnyHop)jumpStarted=double.NaN;else{if(double.IsNaN(jumpStarted))jumpStarted=elapsedSeconds;if(IsReleased(elapsedSeconds-jumpStarted,settings.BunnyPeriodMs))result=result with {Buttons=result.Buttons&~Buttons.A};}
